@@ -38,5 +38,5 @@ app.use("/api/ai/generate-explanation", protect, generateConceptExplanation);
 app.use("/uploads", express.static(path.join(__dirname, "uploads"), {}));
 
 // Start Server
-const PORT = process.env.PORT || 5000;
+const PORT =  8000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
