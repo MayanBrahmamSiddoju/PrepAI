@@ -22,6 +22,7 @@ jobs:
     strategy:
       matrix:
         svc: [backend, frontend]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +42,7 @@ jobs:
           restore-keys: |
             buildx-cache-${{ matrix.svc }}-
 
-      # Check Docker Hub secrets in a safe runtime step
+      # Check Docker Hub secrets in a safe runtime step (avoid secrets.* in parse-time expressions)
       - name: Check Docker Hub secrets
         id: check-creds
         run: |
