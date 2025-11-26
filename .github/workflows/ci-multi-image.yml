@@ -13,7 +13,7 @@ env:
   FRONTEND_DIR: frontend
   IMAGE_TAG: ${{ github.sha }}
   IMAGE_LATEST: latest
-  OWNER: ${{ toLower(github.repository_owner) }}
+  OWNER: ${{ github.repository_owner }}
 
 jobs:
   build-images:
@@ -58,34 +58,38 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Choose context & image name
+      - name: Choose context & image name (force lowercase)
         id: vars
         run: |
+          owner_lower=$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')
           if [ "${{ matrix.svc }}" = "backend" ]; then
             echo "context=${BACKEND_DIR}" >> "$GITHUB_OUTPUT"
-            echo "image_name=${OWNER}/prepai-backend" >> "$GITHUB_OUTPUT"
+            echo "image_name=${owner_lower}/prepai-backend" >> "$GITHUB_OUTPUT"
           else
             echo "context=${FRONTEND_DIR}" >> "$GITHUB_OUTPUT"
-            echo "image_name=${OWNER}/prepai-frontend" >> "$GITHUB_OUTPUT"
+            echo "image_name=${owner_lower}/prepai-frontend" >> "$GITHUB_OUTPUT"
           fi
+          echo "owner_lower=${owner_lower}" >> "$GITHUB_OUTPUT"
 
-      - name: Build tags list
+      - name: Build tags list (all-lowercase safety)
         id: set-tags
         env:
           IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
           IMAGE_LATEST: ${{ env.IMAGE_LATEST }}
         run: |
-          tags="docker.io/${IMAGE_NAME}:${IMAGE_TAG}\ndocker.io/${IMAGE_NAME}:${IMAGE_LATEST}"
+          img_lower=$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
+          tags="docker.io/${img_lower}:${IMAGE_TAG}\ndocker.io/${img_lower}:${IMAGE_LATEST}"
           echo "tags<<EOF" >> "$GITHUB_OUTPUT"
           printf "%b\n" "$tags" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "computed_image=${img_lower}" >> "$GITHUB_OUTPUT"
 
       - name: Debug: show computed names & tags
         run: |
           echo "context: ${{ steps.vars.outputs.context }}"
-          echo "image_name: ${{ steps.vars.outputs.image_name }}"
-          echo "example tag: docker.io/${{ steps.vars.outputs.image_name }}:${{ env.IMAGE_TAG }}"
+          echo "image_name (lowercased): ${{ steps.set-tags.outputs.computed_image }}"
+          echo "example tag: docker.io/${{ steps.set-tags.outputs.computed_image }}:${{ env.IMAGE_TAG }}"
           echo "tags to send to buildx:"
           printf '%s\n' "${{ steps.set-tags.outputs.tags }}"
 
@@ -98,14 +102,13 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.set-tags.outputs.tags }}
           push: ${{ steps.check-creds.outputs.do_push == 'true' }}
-          # load the image into the runner's Docker daemon so docker save works reliably
           load: true
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
 
       - name: Save image metadata
         run: |
-          echo "IMAGE=${{ steps.vars.outputs.image_name }}" > image-info.txt
+          echo "IMAGE=${{ steps.set-tags.outputs.computed_image }}" > image-info.txt
           echo "TAG=${IMAGE_TAG}" >> image-info.txt
           cat image-info.txt
 
@@ -113,9 +116,9 @@ jobs:
         if: always()
         run: |
           mkdir -p out
-          IMG=docker.io/${{ steps.vars.outputs.image_name }}:${{ env.IMAGE_TAG }}
-          # image should be loaded into the runner by the previous step (load: true)
-          docker image inspect "$IMG" >/dev/null 2>&1 || echo "Image $IMG not present locally; docker save may fail"
+          IMG="docker.io/${{ steps.set-tags.outputs.computed_image }}:${{ env.IMAGE_TAG }}"
+          echo "Saving image: $IMG"
+          docker image inspect "$IMG" >/dev/null 2>&1 || echo "Warning: image $IMG not present locally; docker save may fail"
           docker save "$IMG" -o out/${{ matrix.svc }}-${{ env.IMAGE_TAG }}.tar || true
 
       - name: Upload artifact
