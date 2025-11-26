@@ -1,4 +1,4 @@
-name: CI — Build backend & frontend Docker images
+name: Docker Build & Push
 
 on:
   push:
@@ -11,10 +11,9 @@ permissions:
 env:
   BACKEND_DIR: backend
   FRONTEND_DIR: frontend
-  BACKEND_IMAGE: ${{ toLower(github.repository_owner) }}/prepai-backend
-  FRONTEND_IMAGE: ${{ toLower(github.repository_owner) }}/prepai-frontend
   IMAGE_TAG: ${{ github.sha }}
   IMAGE_LATEST: latest
+  OWNER: ${{ toLower(github.repository_owner) }}
 
 jobs:
   build-images:
@@ -42,68 +41,103 @@ jobs:
           restore-keys: |
             buildx-cache-${{ matrix.svc }}-
 
-      # Check Docker Hub secrets in a safe runtime step (avoid secrets.* in parse-time expressions)
-      - name: Check Docker Hub secrets
+      - name: Check which credentials are available
         id: check-creds
         run: |
+          # Docker Hub creds?
           if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
             echo "dockerhub=true" >> "$GITHUB_OUTPUT"
           else
             echo "dockerhub=false" >> "$GITHUB_OUTPUT"
           fi
+          # GHCR token?
+          if [ -n "${{ secrets.GHCR_PAT }}" ]; then
+            echo "ghcr=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ghcr=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Will we push anywhere?
+          if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] || [ -n "${{ secrets.GHCR_PAT }}" ]; then
+            echo "do_push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "do_push=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Login to Docker Hub (only if secrets exist)
-        if: ${{ steps.check-creds.outputs.dockerhub == 'true' }}
+      - name: Log in to Docker Hub (if available)
+        if: steps.check-creds.outputs.dockerhub == 'true'
         uses: docker/login-action@v2
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Choose context & image for this matrix
+      - name: Log in to GHCR (if available)
+        if: steps.check-creds.outputs.ghcr == 'true'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Choose context & image name
         id: vars
         run: |
           if [ "${{ matrix.svc }}" = "backend" ]; then
             echo "context=${BACKEND_DIR}" >> "$GITHUB_OUTPUT"
-            echo "docker_image=${BACKEND_IMAGE}" >> "$GITHUB_OUTPUT"
+            echo "image_name=${OWNER}/prepai-backend" >> "$GITHUB_OUTPUT"
           else
             echo "context=${FRONTEND_DIR}" >> "$GITHUB_OUTPUT"
-            echo "docker_image=${FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
+            echo "image_name=${OWNER}/prepai-frontend" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Debug: show computed image name & tag
+      - name: Build the tags list (omit GHCR tag if no GHCR creds)
+        id: make-tags
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "docker.io/${{ steps.vars.outputs.image_name }}:${IMAGE_TAG}"
+            echo "docker.io/${{ steps.vars.outputs.image_name }}:${IMAGE_LATEST}"
+            if [ "${{ steps.check-creds.outputs.ghcr }}" = "true" ]; then
+              echo "ghcr.io/${{ steps.vars.outputs.image_name }}:${IMAGE_TAG}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 'Debug: show computed names & tags'
         run: |
           echo "context: ${{ steps.vars.outputs.context }}"
-          echo "docker image base: ${{ steps.vars.outputs.docker_image }}"
-          echo "full tag (example): docker.io/${{ steps.vars.outputs.docker_image }}:${{ env.IMAGE_TAG }}"
+          echo "image_name: ${{ steps.vars.outputs.image_name }}"
+          echo "example tag: docker.io/${{ steps.vars.outputs.image_name }}:${IMAGE_TAG}"
+          echo "tags to send to buildx:"
+          printf '%s\n' "${{ steps.make-tags.outputs.tags }}"
 
-      - name: Build & optionally push Docker Hub image
+      - name: Build & push (conditional)
         uses: docker/build-push-action@v4
         with:
           context: ${{ steps.vars.outputs.context }}
           file: ${{ steps.vars.outputs.context }}/Dockerfile
           builder: ${{ steps.buildx.outputs.name }}
           platforms: linux/amd64
-          tags: |
-            docker.io/${{ steps.vars.outputs.docker_image }}:${{ env.IMAGE_TAG }}
-            docker.io/${{ steps.vars.outputs.docker_image }}:${{ env.IMAGE_LATEST }}
-          push: ${{ steps.check-creds.outputs.dockerhub == 'true' }}
+          tags: ${{ steps.make-tags.outputs.tags }}
+          push: ${{ steps.check-creds.outputs.do_push == 'true' }}
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
 
       - name: Save image metadata
         run: |
-          echo "IMAGE=${{ steps.vars.outputs.docker_image }}" > image-info.txt
-          echo "TAG=${IMAGE_TAG}" >> image-info.txt
+          {
+            echo "IMAGE=${{ steps.vars.outputs.image_name }}"
+            echo "TAG=${IMAGE_TAG}"
+          } > image-info.txt
           cat image-info.txt
 
       - name: Save image as tar (artifact)
         if: always()
         run: |
           mkdir -p out
-          IMG=docker.io/${{ steps.vars.outputs.docker_image }}:${{ env.IMAGE_TAG }}
+          IMG="docker.io/${{ steps.vars.outputs.image_name }}:${IMAGE_TAG}"
           docker pull "$IMG" || true
-          docker save "$IMG" -o out/${{ matrix.svc }}-${{ env.IMAGE_TAG }}.tar || true
+          docker save "$IMG" -o "out/${{ matrix.svc }}-${IMAGE_TAG}.tar" || true
 
       - name: Upload artifact
         if: always()
