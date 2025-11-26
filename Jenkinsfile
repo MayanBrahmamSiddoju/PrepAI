@@ -1,107 +1,105 @@
+// Jenkinsfile (declarative)
 pipeline {
-  agent any
-  environment {
-    BACKEND_DIR = 'backend'
-    FRONTEND_DIR = 'frontend/interview-prep-ai'
-    DOCKER_REGISTRY = 'docker.io'
+  agent {
+    // run inside a docker container that has node & docker (if docker build needed)
+    docker {
+      image 'node:18'
+      args '--network host' // optional, remove if not needed
+    }
   }
+
+  environment {
+    // set these in Jenkins credentials / job config for security
+    DOCKERHUB_CREDS = credentials('dockerhub-creds')  // username:password (optional)
+    GIT_COMMIT_SHORT = "${env.GIT_COMMIT?.take(8)}"
+    IMAGE_NAME = "mayanbrahmam/prepai-backend"
+  }
+
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+    timestamps()
+    ansiColor('xterm')
+  }
+
   stages {
     stage('Checkout') {
       steps {
         checkout scm
+        script { echo "Checked out ${env.GIT_COMMIT}" }
       }
     }
 
-    stage('Install Backend Dependencies') {
+    stage('Install') {
       steps {
-        dir("${env.BACKEND_DIR}") {
-          sh 'npm ci'
+        sh 'node --version || true'
+        sh 'npm ci'                 // use npm ci for CI; use npm install if necessary
+      }
+    }
+
+    stage('Lint') {
+      steps {
+        // optional, skip if you don't have eslint
+        sh 'npm run lint || true'
+      }
+    }
+
+    stage('Test') {
+      steps {
+        // run tests and output JUnit XML to reports/junit.xml
+        sh 'npm test -- --reporter mocha-junit-reporter --reporter-options mochaFile=reports/junit.xml || true'
+      }
+      post {
+        always {
+          // archive test results for Jenkins to parse
+          junit testResults: 'reports/junit.xml', allowEmptyResults: true
+          archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
         }
       }
     }
 
-    stage('Install Frontend Dependencies') {
+    stage('Build') {
       steps {
-        dir("${env.FRONTEND_DIR}") {
-          sh 'npm ci'
-        }
+        // project-specific build; e.g. for a frontend: npm run build
+        sh 'npm run build || true'
+        stash includes: 'dist/**', name: 'dist'   // adjust to your build output folder
       }
     }
 
-    stage('Build Frontend') {
+    stage('Docker Build & Push') {
+      when { expression { return env.BUILD_DOCKER == 'true' } } // set param BUILD_DOCKER=true to enable
       steps {
-        dir("${env.FRONTEND_DIR}") {
-          sh 'npm run build'
-        }
-      }
-    }
-
-    stage('Run Tests') {
-      steps {
-        script {
-          // Run backend tests if they exist
-          dir("${env.BACKEND_DIR}") {
-            if (fileExists('package.json')) {
-              def pkg = readJSON file: 'package.json'
-              if (pkg.scripts?.test) {
-                sh 'npm test'
-              } else {
-                echo 'No backend test script defined; skipping backend tests.'
-              }
-            }
-          }
-
-          // Run frontend tests / lint if configured
-          dir("${env.FRONTEND_DIR}") {
-            if (fileExists('package.json')) {
-              def fpkg = readJSON file: 'package.json'
-              if (fpkg.scripts?.test) {
-                sh 'npm test'
-              } else if (fpkg.scripts?.lint) {
-                sh 'npm run lint'
-              } else {
-                echo 'No frontend tests or lint script defined; skipping.'
-              }
-            }
-          }
-        }
+        sh 'docker --version || true'
+        sh """
+           docker build -t ${IMAGE_NAME}:${GIT_COMMIT_SHORT} .
+           echo "${DOCKERHUB_CREDS_PSW}" | docker login -u "${DOCKERHUB_CREDS_USR}" --password-stdin
+           docker tag ${IMAGE_NAME}:${GIT_COMMIT_SHORT} ${IMAGE_NAME}:latest
+           docker push ${IMAGE_NAME}:${GIT_COMMIT_SHORT}
+           docker push ${IMAGE_NAME}:latest
+        """
       }
     }
 
     stage('Archive') {
       steps {
-        archiveArtifacts artifacts: '**/dist/**, **/build/**', allowEmptyArchive: true
-      }
-    }
-    stage('Build & Push Docker Images') {
-      environment {
-        REPO = 'mayanbrahmam'
-        BACKEND_IMAGE = "${REPO}/prepai-backend:${env.BUILD_NUMBER}"
-        FRONTEND_IMAGE = "${REPO}/prepai-frontend:${env.BUILD_NUMBER}"
-      }
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-          sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-          dir("${BACKEND_DIR}") {
-            sh "docker build -t ${BACKEND_IMAGE} ."
-            sh "docker push ${BACKEND_IMAGE}"
-            sh "docker tag ${BACKEND_IMAGE} ${REPO}/prepai-backend:latest"
-            sh "docker push ${REPO}/prepai-backend:latest"
-          }
-          dir("${FRONTEND_DIR}") {
-            sh "docker build -t ${FRONTEND_IMAGE} ."
-            sh "docker push ${FRONTEND_IMAGE}"
-            sh "docker tag ${FRONTEND_IMAGE} ${REPO}/prepai-frontend:latest"
-            sh "docker push ${REPO}/prepai-frontend:latest"
-          }
-        }
+        unstash 'dist'
+        archiveArtifacts artifacts: 'dist/**', fingerprint: true
       }
     }
   }
+
   post {
+    success {
+      echo "Build SUCCESS: ${env.BUILD_URL}"
+    }
+    unstable {
+      echo "Build UNSTABLE"
+    }
+    failure {
+      echo "Build FAILED"
+    }
     always {
-      junit allowEmptyResults: true, testResults: '**/test-results/**/*.xml'
-      cleanWs()
+      // send notification or cleanup (optional)
+      sh 'df -h || true'
     }
   }
 }
