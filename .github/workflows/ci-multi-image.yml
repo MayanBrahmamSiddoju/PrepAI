@@ -11,8 +11,8 @@ permissions:
 env:
   BACKEND_DIR: backend
   FRONTEND_DIR: frontend
-  BACKEND_IMAGE: ${{ github.repository_owner }}/prepai-backend
-  FRONTEND_IMAGE: ${{ github.repository_owner }}/prepai-frontend
+  BACKEND_IMAGE: ${{ toLower(github.repository_owner) }}/prepai-backend
+  FRONTEND_IMAGE: ${{ toLower(github.repository_owner) }}/prepai-frontend
   IMAGE_TAG: ${{ github.sha }}
   IMAGE_LATEST: latest
 
@@ -69,6 +69,12 @@ jobs:
             echo "context=${FRONTEND_DIR}" >> "$GITHUB_OUTPUT"
             echo "docker_image=${FRONTEND_IMAGE}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Debug: show computed image name & tag
+        run: |
+          echo "context: ${{ steps.vars.outputs.context }}"
+          echo "docker image base: ${{ steps.vars.outputs.docker_image }}"
+          echo "full tag (example): docker.io/${{ steps.vars.outputs.docker_image }}:${{ env.IMAGE_TAG }}"
 
       - name: Build & optionally push Docker Hub image
         uses: docker/build-push-action@v4
