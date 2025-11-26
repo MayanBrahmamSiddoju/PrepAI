@@ -85,7 +85,7 @@ jobs:
           echo "EOF" >> "$GITHUB_OUTPUT"
           echo "computed_image=${img_lower}" >> "$GITHUB_OUTPUT"
 
-      - name: Debug: show computed names & tags
+      - name: Debug:show computed names & tags
         run: |
           echo "context: ${{ steps.vars.outputs.context }}"
           echo "image_name (lowercased): ${{ steps.set-tags.outputs.computed_image }}"
