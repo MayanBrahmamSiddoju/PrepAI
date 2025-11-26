@@ -104,7 +104,6 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.set-tags.outputs.tags }}
           push: ${{ steps.check-creds.outputs.do_push == 'true' }}
-          # load the image into the runner's Docker daemon so docker save works reliably
           load: true
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
@@ -121,7 +120,6 @@ jobs:
           mkdir -p out
           IMG="docker.io/${{ steps.set-tags.outputs.computed_image }}:${{ env.IMAGE_TAG }}"
           echo "Saving image: $IMG"
-          # If the image is present (loaded by build-push-action when load: true), docker save will succeed.
           docker image inspect "$IMG" >/dev/null 2>&1 || echo "Warning: image $IMG not present locally; docker save may fail"
           docker save "$IMG" -o out/${{ matrix.svc }}-${{ env.IMAGE_TAG }}.tar || true
 
