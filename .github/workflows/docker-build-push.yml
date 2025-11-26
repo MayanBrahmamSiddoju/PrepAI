@@ -41,25 +41,21 @@ jobs:
           restore-keys: |
             buildx-cache-${{ matrix.svc }}-
 
-      # --- Runtime check of secrets (avoid using secrets.* in if: expressions) ---
       - name: Check which credentials are available
         id: check-creds
         run: |
-          # Docker Hub creds?
           if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
             echo "dockerhub=true" >> "$GITHUB_OUTPUT"
           else
             echo "dockerhub=false" >> "$GITHUB_OUTPUT"
           fi
 
-          # GHCR token?
           if [ -n "${{ secrets.GHCR_PAT }}" ]; then
             echo "ghcr=true" >> "$GITHUB_OUTPUT"
           else
             echo "ghcr=false" >> "$GITHUB_OUTPUT"
           fi
 
-          # Will we push anywhere?
           if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] || [ -n "${{ secrets.GHCR_PAT }}" ]; then
             echo "do_push=true" >> "$GITHUB_OUTPUT"
           else
@@ -93,16 +89,23 @@ jobs:
             echo "image_name=${OWNER}/prepai-frontend" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build the tags list (omit GHCR tag if no GHCR creds)
-        id: make-tags
+      - name: Build tags list (omit GHCR tag if GHCR creds missing)
+        id: set-tags
+        env:
+          IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          IMAGE_LATEST: ${{ env.IMAGE_LATEST }}
+          GHCR_AVAILABLE: ${{ steps.check-creds.outputs.ghcr }}
         run: |
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          echo "docker.io/${{ steps.vars.outputs.image_name }}:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
-          echo "docker.io/${{ steps.vars.outputs.image_name }}:${{ env.IMAGE_LATEST }}" >> "$GITHUB_OUTPUT"
-          if [ "${{ steps.check-creds.outputs.ghcr }}" = "true" ]; then
-            # Add GHCR tag only when GHCR creds are present
-            echo "ghcr.io/${{ steps.vars.outputs.image_name }}:${{ env.IMAGE_TAG }}" >> "$GITHUB_OUTPUT"
+          # build newline-separated tags in a variable
+          tags="docker.io/${IMAGE_NAME}:${IMAGE_TAG}\ndocker.io/${IMAGE_NAME}:${IMAGE_LATEST}"
+          if [ "${GHCR_AVAILABLE}" = "true" ]; then
+            tags="${tags}\nghcr.io/${IMAGE_NAME}:${IMAGE_TAG}"
           fi
+
+          # write multiline output the recommended way
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          printf "%b\n" "$tags" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Debug: show computed names & tags
@@ -111,7 +114,7 @@ jobs:
           echo "image_name: ${{ steps.vars.outputs.image_name }}"
           echo "example tag: docker.io/${{ steps.vars.outputs.image_name }}:${{ env.IMAGE_TAG }}"
           echo "tags to send to buildx:"
-          printf '%s\n' "${{ steps.make-tags.outputs.tags }}"
+          printf '%s\n' "${{ steps.set-tags.outputs.tags }}"
 
       - name: Build & push (conditional)
         uses: docker/build-push-action@v4
@@ -120,7 +123,7 @@ jobs:
           file: ${{ steps.vars.outputs.context }}/Dockerfile
           builder: ${{ steps.buildx.outputs.name }}
           platforms: linux/amd64
-          tags: ${{ steps.make-tags.outputs.tags }}
+          tags: ${{ steps.set-tags.outputs.tags }}
           push: ${{ steps.check-creds.outputs.do_push == 'true' }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
