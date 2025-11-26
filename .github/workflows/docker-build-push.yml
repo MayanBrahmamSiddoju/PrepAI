@@ -1,42 +1,90 @@
-name: Build and Push Docker Images
+name: Build Docker image
 
+# run on every push to any branch (adjust branches if needed)
 on:
   push:
-    branches:
-      - main
-      - master
-      - develop
+    branches: ['**']
+
+# If you want to push to GHCR using GITHUB_TOKEN, workflow needs package write permission.
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
+
     env:
-      DOCKERHUB_REPO: mayanbrahmam
+      IMAGE_NAME: ${{ github.repository }}        # e.g. youruser/PrepAI
+      IMAGE_TAG: ${{ github.sha }}                # unique tag per commit
+      IMAGE_LATEST: latest
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up QEMU (for cross-platform builds; optional)
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - name: Cache Docker layers
+        uses: actions/cache@v4
         with:
+          path: /tmp/.buildx-cache
+          key: buildx-cache-${{ github.sha }}
+          restore-keys: |
+            buildx-cache-
+
+      - name: Log in to registry (Docker Hub) if credentials provided
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v2
+        with:
+          registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push backend image
-        uses: docker/build-push-action@v5
+      - name: Log in to GHCR (if GHCR_PAT provided) — optional
+        if: ${{ secrets.GHCR_PAT != '' }}
+        uses: docker/login-action@v2
         with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          tags: ${{ env.DOCKERHUB_REPO }}/prepai-backend:latest
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
 
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v5
+      - name: Build (and optionally push) Docker image
+        uses: docker/build-push-action@v4
         with:
-          context: ./frontend/interview-prep-ai
-          file: ./frontend/interview-prep-ai/Dockerfile
-          push: true
-          tags: ${{ env.DOCKERHUB_REPO }}/prepai-frontend:latest
+          context: .
+          file: ./Dockerfile                # adjust path if Dockerfile in subfolder
+          builder: ${{ steps.buildx.outputs.name || 'default' }}
+          tags: |
+            docker.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            docker.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_LATEST }}
+            ghcr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          # push only if either Docker Hub creds or GHCR token is provided
+          push: ${{ (secrets.DOCKERHUB_TOKEN != '') || (secrets.GHCR_PAT != '') }}
+          outputs: type=registry
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache
+
+      - name: Save image metadata
+        if: always()
+        run: |
+          echo "image_tags=docker.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }},docker.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_LATEST }}" >> $GITHUB_OUTPUT
+
+      - name: Upload built image as artifact (tar) — optional: keeps a copy even if not pushed
+        if: ${{ always() }}
+        run: |
+          mkdir -p out
+          IMAGE=docker.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker pull $IMAGE || true
+          docker save $IMAGE -o out/image-${{ env.IMAGE_TAG }}.tar || true
+        # upload even if the save failed (so you can inspect logs)
+      - name: Upload artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-archive
+          path: out/*.tar
