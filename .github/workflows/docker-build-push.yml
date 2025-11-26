@@ -13,7 +13,7 @@ env:
   FRONTEND_DIR: frontend
   IMAGE_TAG: ${{ github.sha }}
   IMAGE_LATEST: latest
-  OWNER: ${{ toLower(github.repository_owner) }}
+  OWNER: ${{ github.repository_owner }}   # <-- removed toLower()
 
 jobs:
   build-images:
@@ -49,29 +49,27 @@ jobs:
           else
             echo "dockerhub=false" >> "$GITHUB_OUTPUT"
           fi
-
           if [ -n "${{ secrets.GHCR_PAT }}" ]; then
             echo "ghcr=true" >> "$GITHUB_OUTPUT"
           else
             echo "ghcr=false" >> "$GITHUB_OUTPUT"
           fi
-
           if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] || [ -n "${{ secrets.GHCR_PAT }}" ]; then
             echo "do_push=true" >> "$GITHUB_OUTPUT"
           else
             echo "do_push=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Login to Docker Hub (if available)
-        if: ${{ steps.check-creds.outputs.dockerhub == 'true' }}
+      - name: Log in to Docker Hub (if available)
+        if: steps.check-creds.outputs.dockerhub == 'true'
         uses: docker/login-action@v2
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Login to GHCR (if available)
-        if: ${{ steps.check-creds.outputs.ghcr == 'true' }}
+      - name: Log in to GHCR (if available)
+        if: steps.check-creds.outputs.ghcr == 'true'
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
@@ -89,32 +87,26 @@ jobs:
             echo "image_name=${OWNER}/prepai-frontend" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build tags list (omit GHCR tag if GHCR creds missing)
-        id: set-tags
-        env:
-          IMAGE_NAME: ${{ steps.vars.outputs.image_name }}
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
-          IMAGE_LATEST: ${{ env.IMAGE_LATEST }}
-          GHCR_AVAILABLE: ${{ steps.check-creds.outputs.ghcr }}
+      - name: Build the tags list (omit GHCR tag if no GHCR creds)
+        id: make-tags
         run: |
-          # build newline-separated tags in a variable
-          tags="docker.io/${IMAGE_NAME}:${IMAGE_TAG}\ndocker.io/${IMAGE_NAME}:${IMAGE_LATEST}"
-          if [ "${GHCR_AVAILABLE}" = "true" ]; then
-            tags="${tags}\nghcr.io/${IMAGE_NAME}:${IMAGE_TAG}"
-          fi
+          {
+            echo "tags<<EOF"
+            echo "docker.io/${{ steps.vars.outputs.image_name }}:${IMAGE_TAG}"
+            echo "docker.io/${{ steps.vars.outputs.image_name }}:${IMAGE_LATEST}"
+            if [ "${{ steps.check-creds.outputs.ghcr }}" = "true" ]; then
+              echo "ghcr.io/${{ steps.vars.outputs.image_name }}:${IMAGE_TAG}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
-          # write multiline output the recommended way
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          printf "%b\n" "$tags" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Debug: show computed names & tags
+      - name: 'Debug: show computed names & tags'
         run: |
           echo "context: ${{ steps.vars.outputs.context }}"
           echo "image_name: ${{ steps.vars.outputs.image_name }}"
-          echo "example tag: docker.io/${{ steps.vars.outputs.image_name }}:${{ env.IMAGE_TAG }}"
+          echo "example tag: docker.io/${{ steps.vars.outputs.image_name }}:${IMAGE_TAG}"
           echo "tags to send to buildx:"
-          printf '%s\n' "${{ steps.set-tags.outputs.tags }}"
+          printf '%s\n' "${{ steps.make-tags.outputs.tags }}"
 
       - name: Build & push (conditional)
         uses: docker/build-push-action@v4
@@ -123,24 +115,26 @@ jobs:
           file: ${{ steps.vars.outputs.context }}/Dockerfile
           builder: ${{ steps.buildx.outputs.name }}
           platforms: linux/amd64
-          tags: ${{ steps.set-tags.outputs.tags }}
+          tags: ${{ steps.make-tags.outputs.tags }}
           push: ${{ steps.check-creds.outputs.do_push == 'true' }}
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
 
       - name: Save image metadata
         run: |
-          echo "IMAGE=${{ steps.vars.outputs.image_name }}" > image-info.txt
-          echo "TAG=${IMAGE_TAG}" >> image-info.txt
+          {
+            echo "IMAGE=${{ steps.vars.outputs.image_name }}"
+            echo "TAG=${IMAGE_TAG}"
+          } > image-info.txt
           cat image-info.txt
 
       - name: Save image as tar (artifact)
         if: always()
         run: |
           mkdir -p out
-          IMG=docker.io/${{ steps.vars.outputs.image_name }}:${{ env.IMAGE_TAG }}
+          IMG="docker.io/${{ steps.vars.outputs.image_name }}:${IMAGE_TAG}"
           docker pull "$IMG" || true
-          docker save "$IMG" -o out/${{ matrix.svc }}-${{ env.IMAGE_TAG }}.tar || true
+          docker save "$IMG" -o "out/${{ matrix.svc }}-${IMAGE_TAG}.tar" || true
 
       - name: Upload artifact
         if: always()
