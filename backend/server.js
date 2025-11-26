@@ -5,8 +5,8 @@ const path = require("path");
 const connectDB = require("./config/db");
 const promClient = require("prom-client");
 
-const authRoutes = require('./routes/authRoutes')
-const sessionRoutes = require('./routes/sessionRoutes')
+const authRoutes = require('./routes/authRoutes');
+const sessionRoutes = require('./routes/sessionRoutes');
 const questionRoutes = require('./routes/questionRoutes');
 const { protect } = require("./middlewares/authMiddleware");
 const { generateInterviewQuestions, generateConceptExplanation } = require("./controllers/aiController");
@@ -32,7 +32,7 @@ const httpRequestTotal = new promClient.Counter({
   registers: [register],
 });
 
-// Middleware to handle CORS
+// CORS middleware
 app.use(
   cors({
     origin: "*",
@@ -58,22 +58,41 @@ app.use((req, res, next) => {
   next();
 });
 
-connectDB()
+connectDB();
 
-// Middleware
+// JSON parser
 app.use(express.json());
 
-// Routes
+// --------------------------
+// ⭐ ADD ROOT & HEALTH ROUTES
+// --------------------------
+app.get("/", (req, res) => {
+  res.status(200).send("PrepAI backend is running 🚀");
+});
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// --------------------------
+// API Routes
+// --------------------------
 app.use("/api/auth", authRoutes);
-app.use('/api/sessions', sessionRoutes);
-app.use('/api/questions', questionRoutes);
+app.use("/api/sessions", sessionRoutes);
+app.use("/api/questions", questionRoutes);
 
 app.use("/api/ai/generate-questions", protect, generateInterviewQuestions);
 app.use("/api/ai/generate-explanation", protect, generateConceptExplanation);
 
 // Serve uploads folder
-app.use("/uploads", express.static(path.join(__dirname, "uploads"), {}));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// Start Server
-const PORT =  8000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// --------------------------
+// ⭐ Ensure Docker can access server
+// --------------------------
+const PORT = 8000;
+app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
