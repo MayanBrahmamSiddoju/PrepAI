@@ -1,7 +1,5 @@
 pipeline {
-  agent {
-    docker { image 'node:18' }
-  }
+  agent any
 
   options {
     buildDiscarder(logRotator(numToKeepStr: '20'))
@@ -17,18 +15,21 @@ pipeline {
 
     stage('Install') {
       steps {
-        sh 'node --version || true'
-        sh 'npm ci || npm install'
+        // run Windows batch commands
+        bat 'node --version || echo "node not found"'
+        bat 'npm --version || echo "npm not found"'
+        bat 'npm ci || npm install'
       }
     }
 
     stage('Test') {
       steps {
-        sh 'mkdir -p reports || true'
-        sh 'npm test || true'
+        bat 'if not exist reports (mkdir reports)'
+        bat 'npm test || exit 0'
       }
       post {
         always {
+          // publish JUnit XML (works on Windows)
           junit testResults: 'reports/**/*.xml', allowEmptyResults: true
           archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
         }
@@ -37,7 +38,7 @@ pipeline {
 
     stage('Build') {
       steps {
-        sh 'npm run build || true'
+        bat 'npm run build || exit 0'
         archiveArtifacts artifacts: 'dist/**', allowEmptyArchive: true
       }
     }
@@ -47,6 +48,6 @@ pipeline {
     success { echo "Build SUCCESS: ${env.BUILD_URL}" }
     unstable { echo "Build UNSTABLE" }
     failure { echo "Build FAILED" }
-    always { sh 'echo cleanup || true' }
+    always { echo "cleanup step" }
   }
 }
