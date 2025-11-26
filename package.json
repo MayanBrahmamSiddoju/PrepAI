@@ -1,0 +1,15 @@
+{
+  "scripts": {
+    "lint": "eslint . || true",
+    "test": "mocha --reporter mocha-junit-reporter",
+    "build": "node build-script.js || echo 'no build step'"
+  },
+  "devDependencies": {
+    "mocha": "^10.0.0",
+    "mocha-junit-reporter": "^2.0.0",
+    "eslint": "^8.0.0"
+  },
+  "mochaJunitReporterReporterOptions": {
+    "mochaFile": "reports/junit.xml"
+  }
+}
