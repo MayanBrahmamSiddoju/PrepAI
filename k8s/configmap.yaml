@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prepai-config
+  namespace: prepai
+data:
+  MONGODB_URI: "mongodb://mongo:27017/prepai"
+  PORT: "8000"

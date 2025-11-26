@@ -1,0 +1,39 @@
+#! backend-deployment.yaml
+# Generated code, do not edit
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: backend
+    namespace: prepai
+    labels:
+        com.docker.compose.project: prepai
+        com.docker.compose.service: backend
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            com.docker.compose.project: prepai
+            com.docker.compose.service: backend
+    strategy:
+        type: Recreate
+    template:
+        metadata:
+            labels:
+                com.docker.compose.project: prepai
+                com.docker.compose.service: backend
+                com.docker.compose.network.default: "true"
+        spec:
+            containers:
+                - name: backend
+                  image: prepai-backend
+                  imagePullPolicy: IfNotPresent
+                  env:
+                    - name: GEMINI_API_KEY
+                      value: "AIzaSyBmaCblpKLL53baEA8665weRlUGYVUR5tI"
+                    - name: JWT_SECRET
+                      value: "vhbwkvbekbvekvbrekvb"
+                    - name: MONGODB_URI
+                      value: "mongodb+srv://kundybrahmam:Kundy%402005@venkat.jbcp8yl.mongodb.net/?retryWrites=true&w=majority&appName=venkat"
+                  ports:
+                    - name: backend-8000
+                      containerPort: 8000

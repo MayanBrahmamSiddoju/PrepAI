@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const connectDB = require("./config/db");
+const promClient = require("prom-client");
 
 const authRoutes = require('./routes/authRoutes')
 const sessionRoutes = require('./routes/sessionRoutes')
@@ -12,6 +13,25 @@ const { generateInterviewQuestions, generateConceptExplanation } = require("./co
 
 const app = express();
 
+// Prometheus metrics setup
+const register = new promClient.Registry();
+promClient.collectDefaultMetrics({ register });
+
+// Custom metrics
+const httpRequestDuration = new promClient.Histogram({
+  name: "http_request_duration_ms",
+  help: "Duration of HTTP requests in ms",
+  labelNames: ["method", "route", "status_code"],
+  registers: [register],
+});
+
+const httpRequestTotal = new promClient.Counter({
+  name: "http_requests_total",
+  help: "Total number of HTTP requests",
+  labelNames: ["method", "route", "status_code"],
+  registers: [register],
+});
+
 // Middleware to handle CORS
 app.use(
   cors({
@@ -20,6 +40,23 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+// Metrics endpoint
+app.get("/metrics", (req, res) => {
+  res.set("Content-Type", register.contentType);
+  res.end(register.metrics());
+});
+
+// Prometheus middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    httpRequestDuration.labels(req.method, req.route?.path || req.path, res.statusCode).observe(duration);
+    httpRequestTotal.labels(req.method, req.route?.path || req.path, res.statusCode).inc();
+  });
+  next();
+});
 
 connectDB()
 
