@@ -1,12 +1,67 @@
-name: CI — Success Check
+name: CI — Many Passing Jobs
 
 on:
   push:
     branches: ["**"]
+  workflow_dispatch:
 
 jobs:
-  success-check:
+  job-1:
     runs-on: ubuntu-latest
     steps:
-      - name: Show message
-        run: echo "Build successful — green tick shown!"
+      - name: Quick success
+        run: echo "job-1: success"
+
+  job-2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-2: success"
+
+  job-3:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-3: success"
+
+  job-4:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-4: success"
+
+  job-5:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-5: success"
+
+  job-6:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-6: success"
+
+  job-7:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-7: success"
+
+  job-8:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-8: success"
+
+  job-9:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-9: success"
+
+  job-10:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick success
+        run: echo "job-10: success"
