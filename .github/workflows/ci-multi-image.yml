@@ -97,7 +97,6 @@ jobs:
           IMAGE_LATEST: ${{ env.IMAGE_LATEST }}
         run: |
           repo_lower=$(echo "${REPO_NAME}" | tr '[:upper:]' '[:lower:]')
-          # tag prefix for Docker Hub
           tag1="docker.io/${repo_lower}:${IMAGE_TAG}"
           tag2="docker.io/${repo_lower}:${IMAGE_LATEST}"
           echo "tags<<EOF" >> "$GITHUB_OUTPUT"
@@ -125,8 +124,6 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.set-tags.outputs.tags }}
           push: ${{ steps.check-creds.outputs.do_push == 'true' }}
-          # If we are pushing to a remote registry, do NOT set load=true.
-          # Load into local docker only when not pushing (useful for debugging).
           load: ${{ steps.check-creds.outputs.do_push == 'false' }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
