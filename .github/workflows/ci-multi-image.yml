@@ -1,4 +1,4 @@
-name: CI — Many Passing Jobs
+name: CI — Many Passing Jobs (10)
 
 on:
   push:
