@@ -123,7 +123,6 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.set-tags.outputs.tags }}
           push: ${{ steps.check-creds.outputs.do_push == 'true' }}
-          # load into local docker only when NOT pushing (useful for debugging)
           load: ${{ steps.check-creds.outputs.do_push == 'false' }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
