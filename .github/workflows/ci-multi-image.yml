@@ -1,3 +1,13 @@
+# 1) list workflows so we know what's present
+ls -la .github/workflows || (echo "No workflows folder found"; exit 1)
+
+# 2) backup the existing problematic file (so you can restore if needed)
+mkdir -p .github/workflows/backup
+cp .github/workflows/ci-multi-image.yml .github/workflows/backup/ci-multi-image.yml.bak || true
+echo "backed up file to .github/workflows/backup/ci-multi-image.yml.bak"
+
+# 3) Overwrite the file safely using a here-doc (this avoids hidden characters)
+cat > .github/workflows/ci-multi-image.yml <<'YAML'
 name: CI — Many Passing Jobs (10)
 
 on:
@@ -65,3 +75,33 @@ jobs:
     steps:
       - name: Quick success
         run: echo "job-10: success"
+YAML
+
+# 4) Ensure LF line endings (requires dos2unix; many runners have it)
+if command -v dos2unix >/dev/null 2>&1; then
+  dos2unix .github/workflows/ci-multi-image.yml || true
+else
+  # fallback: remove CR if present
+  sed -i 's/\r$//' .github/workflows/ci-multi-image.yml || true
+fi
+
+# 5) Show the first 40 lines with line numbers so you can inspect locally
+nl -ba .github/workflows/ci-multi-image.yml | sed -n '1,40p'
+
+# 6) Validate YAML locally with python (prints YAML OK or error)
+python - <<'PY'
+import sys, yaml
+fn=".github/workflows/ci-multi-image.yml"
+try:
+    yaml.safe_load(open(fn, 'r', encoding='utf-8'))
+    print("YAML OK")
+except Exception as e:
+    print("YAML ERROR:", e)
+    sys.exit(2)
+PY
+
+# 7) Commit & push (only if YAML OK)
+read -p "If YAML OK, press Enter to git add/commit/push, or Ctrl+C to abort"
+git add .github/workflows/ci-multi-image.yml
+git commit -m "fix: replace ci-multi-image.yml with minimal valid workflow"
+git push
