@@ -1,4 +1,4 @@
-name: Docker Build & Push
+name: CI — Multi Image Build & Push
 
 on:
   push:
@@ -41,7 +41,7 @@ jobs:
           restore-keys: |
             buildx-cache-${{ matrix.svc }}-
 
-      - name: Check Docker Hub credentials
+      - name: Detect Docker Hub credentials
         id: check-creds
         run: |
           if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
@@ -50,16 +50,18 @@ jobs:
             echo "do_push=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Debug: credential detection
+      - name: Debug: show whether we will push
+        env:
+          DO_PUSH: ${{ steps.check-creds.outputs.do_push }}
         run: |
-          echo "do_push = ${{ steps.check-creds.outputs.do_push }}"
-          if [ "${{ steps.check-creds.outputs.do_push }}" = "true" ]; then
-            echo "Docker Hub creds detected. Will attempt push to Docker Hub."
+          echo "DO_PUSH=$DO_PUSH"
+          if [ "$DO_PUSH" = "true" ]; then
+            echo "Will attempt to push images to Docker Hub."
           else
-            echo "Docker Hub creds not found. Workflow will not push to Docker Hub."
+            echo "Docker Hub credentials not provided — images will NOT be pushed."
           fi
 
-      - name: Login to Docker Hub (if available)
+      - name: Login to Docker Hub (if creds provided)
         if: ${{ steps.check-creds.outputs.do_push == 'true' }}
         uses: docker/login-action@v2
         with:
@@ -67,10 +69,9 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Choose context & image name (prefer DOCKERHUB_USERNAME)
+      - name: Choose context & repo name (prefer DOCKERHUB_USERNAME)
         id: vars
         run: |
-          # Use DOCKERHUB_USERNAME if provided, else fall back to repo owner
           if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
             owner_lower=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')
           else
@@ -79,43 +80,41 @@ jobs:
 
           if [ "${{ matrix.svc }}" = "backend" ]; then
             context="${BACKEND_DIR}"
-            repo_name="${owner_lower}/prepai-backend"
+            repo="${owner_lower}/prepai-backend"
           else
             context="${FRONTEND_DIR}"
-            repo_name="${owner_lower}/prepai-frontend"
+            repo="${owner_lower}/prepai-frontend"
           fi
 
           echo "context=${context}" >> "$GITHUB_OUTPUT"
-          echo "repo_name=${repo_name}" >> "$GITHUB_OUTPUT"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
           echo "owner_lower=${owner_lower}" >> "$GITHUB_OUTPUT"
 
-      - name: Build tags list (all-lowercase safety)
+      - name: Build tag list
         id: set-tags
         env:
-          REPO_NAME: ${{ steps.vars.outputs.repo_name }}
+          REPO: ${{ steps.vars.outputs.repo }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
           IMAGE_LATEST: ${{ env.IMAGE_LATEST }}
         run: |
-          repo_lower=$(echo "${REPO_NAME}" | tr '[:upper:]' '[:lower:]')
-          tag1="docker.io/${repo_lower}:${IMAGE_TAG}"
-          tag2="docker.io/${repo_lower}:${IMAGE_LATEST}"
+          repo_lower=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
+          echo "tag_prefix=docker.io/${repo_lower}" >> "$GITHUB_OUTPUT"
           echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          printf "%s\n" "${tag1}" "${tag2}" >> "$GITHUB_OUTPUT"
+          printf "%s\n" "docker.io/${repo_lower}:${IMAGE_TAG}" "docker.io/${repo_lower}:${IMAGE_LATEST}" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
           echo "computed_image=${repo_lower}" >> "$GITHUB_OUTPUT"
-          echo "tag_prefix=docker.io/${repo_lower}" >> "$GITHUB_OUTPUT"
 
-      - name: Debug: show computed names & tags
+      - name: Debug: names & tags
         run: |
           echo "context: ${{ steps.vars.outputs.context }}"
-          echo "repo_name: ${{ steps.vars.outputs.repo_name }}"
+          echo "repo: ${{ steps.vars.outputs.repo }}"
           echo "computed_image: ${{ steps.set-tags.outputs.computed_image }}"
           echo "example tag: ${{ steps.set-tags.outputs.tag_prefix }}:${{ env.IMAGE_TAG }}"
           echo "do_push: ${{ steps.check-creds.outputs.do_push }}"
-          echo "tags to send to buildx:"
+          echo "tags:"
           printf '%s\n' "${{ steps.set-tags.outputs.tags }}"
 
-      - name: Build & push (conditional)
+      - name: Build and optionally push
         uses: docker/build-push-action@v4
         with:
           context: ${{ steps.vars.outputs.context }}
@@ -124,6 +123,7 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.set-tags.outputs.tags }}
           push: ${{ steps.check-creds.outputs.do_push == 'true' }}
+          # load into local docker only when NOT pushing (useful for debugging)
           load: ${{ steps.check-creds.outputs.do_push == 'false' }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
@@ -134,7 +134,7 @@ jobs:
           echo "TAG=${IMAGE_TAG}" >> image-info.txt
           cat image-info.txt
 
-      - name: Save image as tar (artifact)
+      - name: Save image tar artifact (best-effort)
         if: always()
         run: |
           mkdir -p out
